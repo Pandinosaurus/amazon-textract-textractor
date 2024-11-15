@@ -8,12 +8,11 @@ import string
 import logging
 import xlsxwriter
 import io
+from pathlib import Path
 from typing import List, IO, Union, AnyStr, Tuple
 from copy import deepcopy
 from collections import defaultdict
 from PIL import Image
-
-from trp.trp2 import TDocument, TDocumentSchema
 
 from textractor.entities.expense_document import ExpenseDocument
 from textractor.entities.identity_document import IdentityDocument
@@ -23,10 +22,10 @@ from textractor.entities.page import Page
 from textractor.entities.table import Table
 from textractor.entities.query import Query
 from textractor.entities.signature import Signature
+from textractor.entities.layout import Layout
 from textractor.exceptions import InputError
 from textractor.entities.key_value import KeyValue
 from textractor.entities.bbox import SpatialObject
-from textractor.data.constants import SelectionStatus
 from textractor.utils.s3_utils import download_from_s3
 from textractor.visualizers.entitylist import EntityList
 from textractor.data.constants import (
@@ -35,12 +34,13 @@ from textractor.data.constants import (
     Direction,
     DirectionalFinderType,
 )
-from textractor.entities.selection_element import SelectionElement
-from textractor.utils.search_utils import SearchUtils, jaccard_similarity
+from textractor.utils.search_utils import SearchUtils
 from textractor.data.text_linearization_config import TextLinearizationConfig
+from textractor.data.html_linearization_config import HTMLLinearizationConfig
+from textractor.entities.linearizable import Linearizable
 
 
-class Document(SpatialObject):
+class Document(SpatialObject, Linearizable):
     """
     Represents the description of a single document, as it would appear in the input to the Textract API.
     Document serves as the root node of the object model hierarchy,
@@ -49,12 +49,12 @@ class Document(SpatialObject):
     """
 
     @classmethod
-    def open(cls, fp: Union[dict, str, IO[AnyStr]]):
+    def open(cls, fp: Union[dict, str, Path, IO[AnyStr]]):
         """Create a Document object from a JSON file path, file handle or response dictionary
 
         :param fp: _description_
-        :type fp: Union[dict, str, IO[AnyStr]]
-        :raises InputError: Raised on input not being of type Union[dict, str, IO[AnyStr]]
+        :type fp: Union[dict, str, Path, IO[AnyStr]]
+        :raises InputError: Raised on input not being of type Union[dict, str, Path, IO[AnyStr]]
         :return: Document object
         :rtype: Document
         """
@@ -64,16 +64,19 @@ class Document(SpatialObject):
             return response_parser.parse(fp)
         elif isinstance(fp, str):
             if fp.startswith("s3://"):
-                # FIXME: Opening s3 clients for everythign should be avoided
+                # FIXME: Opening s3 clients for everything should be avoided
                 client = boto3.client("s3")
                 return response_parser.parse(json.load(download_from_s3(client, fp)))
+            with open(fp, "r") as f:
+                return response_parser.parse(json.load(f))
+        elif isinstance(fp, Path):
             with open(fp, "r") as f:
                 return response_parser.parse(json.load(f))
         elif isinstance(fp, io.IOBase):
             return response_parser.parse(json.load(fp))
         else:
             raise InputError(
-                f"Document.open() input must be of type dict, str or file handle, not {type(fp)}"
+                f"Document.open() input must be of type dict, str, Path or a file handle, not {type(fp)}"
             )
 
     def __init__(self, num_pages: int = 1):
@@ -196,6 +199,16 @@ class Document(SpatialObject):
         return EntityList(sum([page.signatures for page in self.pages], []))
 
     @property
+    def layouts(self) -> EntityList[Layout]:
+        """
+        Returns all the :class:`Layout` objects present in the Document
+
+        :return: List of Layout objects
+        :rtype: EntityList[Layout]
+        """
+        return EntityList(sum([page.layouts for page in self.pages], []))
+
+    @property
     def identity_document(self) -> EntityList[IdentityDocument]:
         """
         Returns all the :class:`IdentityDocument` objects present in the Page.
@@ -246,11 +259,6 @@ class Document(SpatialObject):
         """
         self._pages = sorted(pages, key=lambda x: x.page_num)
 
-    def get_text(
-        self, config: TextLinearizationConfig = TextLinearizationConfig()
-    ) -> str:
-        return self.get_text_and_words(config)[0]
-
     def get_text_and_words(
         self, config: TextLinearizationConfig = TextLinearizationConfig()
     ) -> Tuple[str, List]:
@@ -278,6 +286,22 @@ class Document(SpatialObject):
         else:
             raise InputError("page_no parameter doesn't match required data type.")
 
+    def to_html(self, config: HTMLLinearizationConfig = HTMLLinearizationConfig()):
+        """
+        Returns the HTML representation of the document, effectively calls Linearizable.to_html()
+        but add <html><body></body></html> around the result and put each page in a <div>. 
+
+        :return: HTML text of the entity
+        :rtype: str
+        """
+        
+        html = "<html><body>"
+        for page in self.pages:
+            html += f"<div>{page.to_html(config=config)}</div>"
+        html += "</body></html>"
+        
+        return html
+
     def __repr__(self):
         return os.linesep.join(
             [
@@ -295,13 +319,15 @@ class Document(SpatialObject):
             ]
         )
 
-    def to_trp2(self) -> TDocument:
+    def to_trp2(self):
         """
         Parses the response to the trp2 format for backward compatibility
 
         :return: TDocument object that can be used with the older Textractor libraries
         :rtype: TDocument
         """
+        from trp.trp2 import TDocument, TDocumentSchema
+        
         if not self._trp2_document:
             self._trp2_document = TDocumentSchema().load(self.response)
         return self._trp2_document
@@ -543,6 +569,7 @@ class Document(SpatialObject):
         include_kv: bool = True,
         include_checkboxes: bool = True,
         filepath: str = "Key-Values.csv",
+        sep: str = ";",
     ):
         """
         Export key-value entities and checkboxes in csv format.
@@ -553,6 +580,8 @@ class Document(SpatialObject):
         :type include_checkboxes: bool
         :param filepath: Path to where file is to be stored.
         :type filepath: str
+        :param sep: Separator to be used in the csv file.
+        :type sep: str
         """
         keys = []
         values = []
@@ -571,9 +600,9 @@ class Document(SpatialObject):
                 values.append(kv.value.children[0].status.name)
 
         with open(filepath, "w") as f:
-            f.write(f"Key;Value{os.linesep}")
+            f.write(f"Key{sep}Value{os.linesep}")
             for k, v in zip(keys, values):
-                f.write(f"{k};{v}{os.linesep}")
+                f.write(f"{k}{sep}{v}{os.linesep}")
 
         logging.info(
             f"csv file stored at location {os.path.join(os.getcwd(),filepath)}"

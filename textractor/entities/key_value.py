@@ -18,6 +18,7 @@ from textractor.entities.document_entity import DocumentEntity
 from textractor.data.constants import TextTypes
 from textractor.data.text_linearization_config import TextLinearizationConfig
 from textractor.visualizers.entitylist import EntityList
+from textractor.utils.html_utils import add_id_to_html_tag
 
 
 class KeyValue(DocumentEntity):
@@ -46,9 +47,9 @@ class KeyValue(DocumentEntity):
     ):
         super().__init__(entity_id, bbox)
 
-        self._words: List[Word] = []
+        self._words: EntityList[Word] = []
         self.contains_checkbox = contains_checkbox
-        self.confidence = confidence / 100
+        self._confidence = confidence / 100
         self._value: Value = value
         self.selection_status = False
         self._page = None
@@ -88,7 +89,7 @@ class KeyValue(DocumentEntity):
         :return words: List of Word objects, each representing a word within the KeyValue entity.
         :rtype: EntityList[Word]
         """
-        value_words = self.value.words if not self.contains_checkbox else []
+        value_words = self.value.words if self.value is not None and not self.contains_checkbox else []
         return EntityList(
             sorted(self._words + value_words, key=lambda x: x.bbox.x + x.bbox.y)
         )
@@ -96,8 +97,8 @@ class KeyValue(DocumentEntity):
     @property
     def key(self):
         """
-        :return: Returns :class:`Line` object associated with the key.
-        :rtype: Line
+        :return: Returns :class:`EntityList[Word]` object (a list of words) associated with the key.
+        :rtype: EntityList[Word]
         """
         if not self._words:
             logging.info("Key contains no words objects.")
@@ -113,7 +114,7 @@ class KeyValue(DocumentEntity):
         No specific ordering is assumed.
         :type words: list
         """
-        self._words = words
+        self._words = EntityList(words)
 
     @property
     def value(self) -> Value:
@@ -224,7 +225,7 @@ class KeyValue(DocumentEntity):
         self, config: TextLinearizationConfig = TextLinearizationConfig()
     ):
         key_text, key_words = " ".join([w.text for w in self.key]), self.key
-        value_text, value_words = self.value.get_text_and_words(config)
+        value_text, value_words = self.value.get_text_and_words(config) if self.value else ("", "")
         words = []
         if not len(key_text) and not len(value_text):
             return "", []
@@ -235,12 +236,12 @@ class KeyValue(DocumentEntity):
             else " "
         )
         if config.add_prefixes_and_suffixes_in_text:
-            text = f"{config.key_value_prefix}{config.key_prefix}{key_text}{key_suffix}{value_text}{config.key_value_suffix}"
+            text = f"{add_id_to_html_tag(config.key_value_prefix, self.id, config)}{config.key_prefix}{key_text}{key_suffix}{value_text}{config.key_value_suffix}"
         else:
             text = f"{key_text}{config.same_paragraph_separator}{value_text}"
 
         if config.add_prefixes_and_suffixes_as_words:
-            words += [Word(str(uuid.uuid4()), self.bbox, config.key_value_prefix, is_structure=True)] if config.key_value_prefix else []
+            words += [Word(str(uuid.uuid4()), self.bbox, add_id_to_html_tag(config.key_value_prefix, self.id, config), is_structure=True)] if config.key_value_prefix else []
             if key_words:
                 words += (
                     ([Word(str(uuid.uuid4()), BoundingBox.enclosing_bbox(self.key), config.key_prefix, is_structure=True)] if config.key_prefix else []) +

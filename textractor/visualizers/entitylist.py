@@ -25,6 +25,8 @@ from textractor.data.constants import (
     AnalyzeExpenseFields,
 )
 from textractor.exceptions import EntityListCreationError, NoImageException
+from textractor.entities.linearizable import Linearizable
+from textractor.data.text_linearization_config import TextLinearizationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ present_path = os.path.abspath(os.path.dirname(__file__))
 T = TypeVar("T")
 
 
-class EntityList(list, Generic[T]):
+class EntityList(list, Generic[T], Linearizable):
     """
     Creates a list type object, initially empty but extended with the list passed in objs.
 
@@ -103,7 +105,7 @@ class EntityList(list, Generic[T]):
                     self._add_expense_document_to_list(new_entity_list, entity)
                 else:
                     new_entity_list.append(entity)
-            return EntityList(list(set(new_entity_list))).visualize(
+            return EntityList(list(dict.fromkeys(new_entity_list).keys())).visualize(
                 with_text=with_text,
                 with_words=with_words,
                 with_confidence=with_confidence,
@@ -129,7 +131,7 @@ class EntityList(list, Generic[T]):
 
         for page in list(entities_pagewise.keys()):
             # Deduplication
-            entities_pagewise[page] = list(set(entities_pagewise[page]))
+            entities_pagewise[page] = list(dict.fromkeys(entities_pagewise[page]).keys())
 
         for page in entities_pagewise.keys():
             visualized_images[page] = _draw_bbox(
@@ -139,7 +141,7 @@ class EntityList(list, Generic[T]):
                 font_size_ratio,
             )
 
-        images = list(visualized_images.values())
+        images = [image.convert("RGB") for image in visualized_images.values()]
         images = images if len(images) != 1 else images[0]
         return images
 
@@ -485,6 +487,18 @@ class EntityList(list, Generic[T]):
     def __add__(self, list2):
         return EntityList([*self, *list2])
 
+    def get_text_and_words(self, config: TextLinearizationConfig = TextLinearizationConfig()):
+        texts, words = [], []
+        separator = (
+            config.same_paragraph_separator
+            if all([entity.__class__.__name__ == "Word" for entity in self]) else
+            config.layout_element_separator
+        )
+        for entity in self:
+            entity_text, entity_words = entity.get_text_and_words(config)
+            texts.append(entity_text)
+            words.extend(entity_words)
+        return separator.join(texts), words
 
 def _convert_form_to_list(
     form_objects,
@@ -618,6 +632,13 @@ def _draw_bbox(
     :rtype: PIL.Image
     """
     image = entities[0].bbox.spatial_object.image
+    if image is None:
+        for e in entities:
+            if e.bbox.spatial_object.image is not None:
+                image = e.bbox.spatial_object.image
+                break
+        else:
+            raise Exception("Could not find an entity with an associated image!")
     image = image.convert("RGBA")
     overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
     drw = ImageDraw.Draw(overlay, "RGBA")
@@ -626,6 +647,8 @@ def _draw_bbox(
 
     # First drawing tables
     for entity in entities:
+        if entity.bbox is None:
+            continue
         width, height = image.size
         if entity.__class__.__name__ == "Table":
             overlayer_data = _get_overlayer_data(entity, width, height)
@@ -730,6 +753,8 @@ def _draw_bbox(
                     )
     # Second drawing bounding boxes
     for entity in entities:
+        if entity.bbox is None:
+            continue
         if entity.__class__.__name__ == "Query":
             overlayer_data = _get_overlayer_data(entity.result, width, height)
             drw.rectangle(
@@ -815,6 +840,8 @@ def _draw_bbox(
     # Second drawing, text
     if with_text:
         for entity in entities:
+            if entity.bbox is None:
+                continue
             if entity.__class__.__name__ == "Word":
                 width, height = image.size
                 overlayer_data = _get_overlayer_data(entity, width, height)

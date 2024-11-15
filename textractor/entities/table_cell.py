@@ -69,7 +69,7 @@ class TableCell(DocumentEntity):
         self._row_span: int = int(row_span)
         self._col_span: int = int(col_span)
         self._words: List[Word] = []
-        self.confidence = confidence / 100
+        self._confidence = confidence / 100
         self._page = None
         self._page_id = None
         self._is_column_header = is_column_header
@@ -218,14 +218,6 @@ class TableCell(DocumentEntity):
         """
         return self.get_text()
 
-    def get_text(self, config: TextLinearizationConfig = TextLinearizationConfig()) -> str:
-        """Return the text in the cell as one space-separated string
-        
-        :return: Text in the cell
-        :rtype: str
-        """
-        return self.get_text_and_words(config)[0]
-
     def get_text_and_words(
         self, config: TextLinearizationConfig = TextLinearizationConfig()
     ) -> Tuple[str, List]:
@@ -234,13 +226,8 @@ class TableCell(DocumentEntity):
         :return: Text in the cell
         :rtype: Tuple[str, List]
         """
-        texts = []
-        words = []
-        for child in self.children:
-            child_text, child_words = child.get_text_and_words(config)
-            texts.append(child_text)
-            words += child_words
-        return " ".join(texts), words
+        text, words = linearize_children(self.children, config=config, no_new_lines=True)
+        return text, words
 
     @property
     def table_id(self):

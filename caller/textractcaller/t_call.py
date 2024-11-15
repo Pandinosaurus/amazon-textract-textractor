@@ -1,4 +1,4 @@
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Tuple
 from enum import Enum
 import os
 from dataclasses import dataclass, field
@@ -174,6 +174,16 @@ def is_tiff(filename: str) -> bool:
         return True
     return False
 
+def parse_s3_url(url: str) -> Tuple[str, str]:
+    if url.lower().startswith("s3://"):
+        url_parts = url[5:].split("/", 1)
+        bucket = url_parts[0]
+        key = url_parts[1] if len(url_parts) > 1 else None
+        if not key:
+            raise ValueError(f"Missing object key in S3 path {url}")    
+        return bucket, key
+    else:
+        raise ValueError("URL must be in s3://bucket/path/to/file format")
 
 def generate_request_params(
     document_location: Optional[DocumentLocation] = None,
@@ -189,7 +199,7 @@ def generate_request_params(
 ) -> dict:
     params = {}
     if document_location and document:
-        raise ValueError("Only one at a time, documentat_location or document")
+        raise ValueError("Only one at a time, document_location or document")
     if document_location:
         params["DocumentLocation"] = document_location.get_dict()
     if document:
@@ -489,7 +499,9 @@ def call_textract_lending(
     boto3_textract_client=None,
 ):
     if len(input_document) > 7 and input_document.lower().startswith("s3://"):
-        s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+        # Fix #345
+        # s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+        s3_bucket, s3_key = parse_s3_url(url=input_document)
     else:
         raise Exception("input_document needs to be an S3 URL.")
 
@@ -532,6 +544,7 @@ def call_textract(
     call_mode: Textract_Call_Mode = Textract_Call_Mode.DEFAULT,
     boto3_textract_client=None,
     job_done_polling_interval=1,
+    mime_type: str = None, 
 ) -> dict:
     """
     calls Textract and returns a response (either full json as string (json.dumps)or the job_id when return_job_id=True)
@@ -550,6 +563,7 @@ def call_textract(
     job_tag: passed down to Textract API
     boto_3_textract_client: pass in boto3 client (to overcome missing region in environmnent, e. g.)
     job_done_polling_interval: when using async (pdf document of force_async_api,
+    mime_type: will set the "file extension". [ 'application/pdf', 'image/png', 'image/jpeg', 'image/tiff' ]
     the implementation polls every x seconds (1 second by default))
     returns: dict with either Textract response or async API response (incl. the JobId)
     raises LimitExceededException when receiving LimitExceededException from Textract API.
@@ -574,14 +588,14 @@ def call_textract(
     if isinstance(input_document, str):
         if len(input_document) > 7 and input_document.lower().startswith("s3://"):
             is_s3_document = True
-            s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+            # Fix #345
+            # s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+            s3_bucket, s3_key = parse_s3_url(url=input_document)
         ext: str = ""
         _, ext = os.path.splitext(input_document)
         ext = ext.lower()
+        is_pdf: bool = (ext is not None and ext.lower() in only_async_suffixes) or (mime_type == 'application/pdf')
 
-        is_pdf: bool = ext != None and ext.lower() in only_async_suffixes
-        if is_pdf and not is_s3_document:
-            raise ValueError("PDF only supported when located on S3")
         if not is_s3_document and force_async_api:
             raise ValueError("when forcing async, document has to be on s3")
         if not is_s3_document and output_config:
@@ -745,7 +759,9 @@ def call_textract_analyzeid(
         if isinstance(input_document, str):
             if len(input_document) > 7 and input_document.lower().startswith("s3://"):
                 logger.debug("processing s3")
-                s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+                # Fix #345
+                # s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+                s3_bucket, s3_key = parse_s3_url(url=input_document)
                 document_pages_param.append(
                     DocumentPage(
                         s3_object=DocumentLocation(
@@ -791,7 +807,9 @@ def call_textract_expense(
     if isinstance(input_document, str):
         if len(input_document) > 7 and input_document.lower().startswith("s3://"):
             is_s3_document = True
-            s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+            # Fix #345
+            # s3_bucket, s3_key = input_document.replace("s3://", "").split("/", 1)
+            s3_bucket, s3_key = parse_s3_url(url=input_document)
         ext: str = ""
         _, ext = os.path.splitext(input_document)
         ext = ext.lower()

@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 
 import yaml
 from textractor.data.text_linearization_config import TextLinearizationConfig
@@ -341,7 +342,13 @@ def textractor_cli():
         parser.print_help()
         return
 
-    if args.profile_name is None and args.region_name is None:
+    if (
+        args.profile_name is None and
+        args.region_name is None and
+        (os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
+    ):
+        args.region_name = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    elif args.profile_name is None and args.region_name is None:
         args.profile_name = "default"
 
     extractor = Textractor(
@@ -427,6 +434,8 @@ def textractor_cli():
                 print(out.signatures.pretty_print())
             if "ALL" in args.print or "IDS" in args.print:
                 print(out.identity_documents.pretty_print())
+            if "ALL" in args.print or "LAYOUTS" in args.print:
+                print(out.layouts.pretty_print())
 
         if args.linearize is not None:
             if args.linearize_config_path is not None:
@@ -450,6 +459,8 @@ def textractor_cli():
                 entity_list += out.queries
             if "ALL" in args.overlay or "SIGNATURES" in args.overlay:
                 entity_list += out.signatures
+            if "ALL" in args.overlay or "LAYOUTS" in args.overlay:
+                entity_list += out.layouts
             image = entity_list.visualize(
                 with_text=True,
                 font_size_ratio=args.font_size_ratio,

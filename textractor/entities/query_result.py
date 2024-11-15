@@ -39,7 +39,7 @@ class QueryResult(DocumentEntity):
         super().__init__(entity_id, result_bbox)
 
         self.answer = answer
-        self.confidence = confidence / 100
+        self._confidence = confidence / 100
         self._page = None
         self._page_id = None
 
@@ -96,4 +96,4 @@ class QueryResult(DocumentEntity):
         :return: Tuple of text and word list
         :rtype: Tuple[str, List[Word]]
         """
-        return "", []
+        return self.answer, []

@@ -6,9 +6,11 @@ from typing import Dict, List, Tuple
 from textractor.entities.bbox import BoundingBox
 from textractor.visualizers.entitylist import EntityList
 from textractor.data.text_linearization_config import TextLinearizationConfig
+from textractor.data.html_linearization_config import HTMLLinearizationConfig
+from textractor.data.markdown_linearization_config import MarkdownLinearizationConfig
+from textractor.entities.linearizable import Linearizable
 
-
-class DocumentEntity(ABC):
+class DocumentEntity(Linearizable, ABC):
     """
     An interface for all document entities within the document body, composing the
     hierarchy of the document object model.
@@ -149,6 +151,62 @@ class DocumentEntity(ABC):
         """
         return self._children
 
+    @property
+    def confidence(self) -> float:
+        """
+        Returns the object confidence as predicted by Textract. If the confidence is not available, returns None
+
+        :return: Prediction confidence for a document entity, between 0 and 1
+        :rtype: float
+        """
+        
+        # Needed for backward compatibility
+        if hasattr(self, "_confidence"):
+            return self._confidence
+    
+        # Uses the raw response
+        if not hasattr(self, "raw_object"):
+            return None
+        confidence = self.raw_object.get("Confidence")
+        if confidence is None:
+            return None            
+        return confidence / 100
+
+    def remove(self, entity):
+        """
+        Recursively removes an entity from the child tree of a document entity and update its bounding box
+
+        :param entity: Entity
+        :type entity: DocumentEntity
+        """
+
+        for c in self._children:
+            if entity == c:
+                # Element was found in children
+                break
+            if not c.__class__.__name__ == "Word" and c.remove(entity):
+                # Element was found and removed in grand-children
+                if not c.children:
+                    self._children.remove(c)
+                return True
+        else:
+            # Element was not found
+            return False
+        self._children.remove(c)
+        if self._children:
+            self.bbox = BoundingBox.enclosing_bbox(self._children)
+        return True
+
+    def visit(self, word_set):
+        for c in list(self._children):
+            if c.__class__.__name__ == "Word":
+                if c.id in word_set:
+                    self._children.remove(c)
+                else:
+                    word_set.add(c.id)
+            else:
+                c.visit(word_set)
+
     def visualize(self, *args, **kwargs) -> EntityList:
         """
         Returns the object's children in a visualization EntityList object
@@ -157,15 +215,3 @@ class DocumentEntity(ABC):
         :rtype: EntityList
         """
         return EntityList(self).visualize(*args, **kwargs)
-
-    @abstractmethod
-    def get_text_and_words(
-        self, config: TextLinearizationConfig = TextLinearizationConfig()
-    ) -> Tuple[str, List]:
-        """
-        Used for linearization, returns the linearized text of the entity and the matching words
-
-        :return: Tuple of text and word list
-        :rtype: Tuple[str, List[Word]]
-        """
-        pass

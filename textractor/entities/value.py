@@ -19,6 +19,7 @@ from textractor.data.constants import PRINTED, HANDWRITING, TextTypes
 from textractor.visualizers.entitylist import EntityList
 from textractor.data.text_linearization_config import TextLinearizationConfig
 from textractor.utils.text_utils import linearize_children
+from textractor.utils.html_utils import add_id_to_html_tag
 
 
 class Value(DocumentEntity):
@@ -38,7 +39,7 @@ class Value(DocumentEntity):
         self._words: List[Word] = []
         self._key_id = None
         self._contains_checkbox = False
-        self.confidence = confidence / 100
+        self._confidence = confidence / 100
         self._page = None
         self._page_id = None
 
@@ -158,11 +159,6 @@ class Value(DocumentEntity):
 
         return EntityList([word for word in self.words if word.text_type == text_type])
 
-    def get_text(
-        self, config: TextLinearizationConfig = TextLinearizationConfig()
-    ) -> str:
-        return self.get_text_and_words(config)[0]
-
     def get_text_and_words(
         self, config: TextLinearizationConfig = TextLinearizationConfig()
     ):
@@ -176,7 +172,7 @@ class Value(DocumentEntity):
                 no_new_lines=config.remove_new_lines_in_leaf_elements,
             )
         if config.add_prefixes_and_suffixes_in_text:
-            text = config.value_prefix + text + config.value_suffix
+            text = add_id_to_html_tag(config.value_prefix, self.id, config) + text + config.value_suffix
         if config.add_prefixes_and_suffixes_as_words:
             words = (
                 (
@@ -184,7 +180,7 @@ class Value(DocumentEntity):
                         Word(
                             str(uuid.uuid4()),
                             self.bbox,
-                            config.value_prefix,
+                            add_id_to_html_tag(config.value_prefix, self.id, config),
                             is_structure=True,
                             is_clickable=(
                                 bool(words) and words[0] in [config.selection_element_selected, config.selection_element_not_selected]

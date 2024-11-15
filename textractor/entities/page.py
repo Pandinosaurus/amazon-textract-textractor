@@ -42,9 +42,10 @@ from textractor.entities.selection_element import SelectionElement
 from textractor.utils.geometry_util import sort_by_position
 from textractor.utils.search_utils import SearchUtils, jaccard_similarity
 from textractor.visualizers.entitylist import EntityList
+from textractor.entities.linearizable import Linearizable
 
 
-class Page(SpatialObject):
+class Page(SpatialObject, Linearizable):
     """
     Creates a new document, ideally representing a single item in the dataset.
 
@@ -132,19 +133,6 @@ class Page(SpatialObject):
         """
         return self.get_text()
 
-    def get_text(
-        self, config: TextLinearizationConfig = TextLinearizationConfig()
-    ) -> str:
-        """
-        Returns the page text
-
-        :param config: Text linearization configuration object, defaults to TextLinearizationConfig()
-        :type config: TextLinearizationConfig, optional
-        :return: Linearized page text
-        :rtype: str
-        """
-        return self.get_text_and_words(config)[0]
-
     def get_text_and_words(
         self, config: TextLinearizationConfig = TextLinearizationConfig()
     ) -> Tuple[str, List[Word]]:
@@ -187,7 +175,7 @@ class Page(SpatialObject):
         combined_words = []
         for w in words:
             combined_words += w
-        return os.linesep.join(text), combined_words
+        return config.layout_element_separator.join(text), combined_words
 
     @property
     def page_layout(self) -> PageLayout:

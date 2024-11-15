@@ -93,7 +93,7 @@ class LinearizeLayout:
                 table_data = []
                 # Find the matching TABLE block for the LAYOUT_TABLE
                 table_block = None
-                for potential_table in [b for b in self.j['Blocks'] if b['BlockType'] == 'TABLE']:
+                for potential_table in [b for b in self.j['Blocks'] if b['BlockType'] == 'TABLE' and b.get('Page',1) == block.get('Page', 1)]:
                     if self._geometry_match(block['Geometry']['BoundingBox'], potential_table['Geometry']['BoundingBox']):
                         table_block = potential_table
                         break
@@ -108,7 +108,7 @@ class LinearizeLayout:
                             for cell_id in cell_rel['Ids']:
                                 cell_block = id2block[cell_id]
                                 if "Relationships" in cell_block:
-                                    cell_text = " ".join([id2block[line_id]['Text'] for line_id in cell_block["Relationships"][0]['Ids']])
+                                    cell_text = " ".join([id2block[line_id]['Text'] for line_id in cell_block["Relationships"][0]['Ids'] if 'Text' in id2block[line_id]])
                                     row_idx = cell_block['RowIndex']
                                     col_idx = cell_block['ColumnIndex']
                                     max_row = max(max_row, row_idx)

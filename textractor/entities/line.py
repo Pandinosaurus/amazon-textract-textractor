@@ -15,7 +15,8 @@ from textractor.entities.bbox import BoundingBox
 from textractor.exceptions import InputError
 from textractor.entities.document_entity import DocumentEntity
 from textractor.visualizers.entitylist import EntityList
-
+from textractor.utils.html_utils import escape_text
+from textractor.data.text_linearization_config import TextLinearizationConfig
 
 class Line(DocumentEntity):
     """
@@ -40,11 +41,11 @@ class Line(DocumentEntity):
     ):
         super().__init__(entity_id, bbox)
         if words is not None and len(words) > 0:
-            self.words: List[Word] = sorted(words, key=lambda x: (x.bbox.x, x.bbox.y))
+            self._children: List[Word] = sorted(words, key=lambda x: (x.bbox.x, x.bbox.y))
         else:
-            self.words = []
+            self._children = []
 
-        self.confidence = confidence / 100
+        self._confidence = confidence / 100
         self._page = None
         self._page_id = None
 
@@ -56,13 +57,21 @@ class Line(DocumentEntity):
         """
         return " ".join([word.text for word in self.words])
 
-    def get_text_and_words(self, config):
+    @property
+    def words(self):
+        """
+        :return: Returns the line's children
+        :rtype: List[Word]
+        """
+        return self._children
+
+    def get_text_and_words(self, config: TextLinearizationConfig = TextLinearizationConfig()):
         if not self.bbox:
             self.bbox = BoundingBox.enclosing_bbox(self.words)
         for w in self.words:
             w.line_id = self.id
             w.line_bbox = self.bbox
-        return self.text, self.words
+        return escape_text(self.text, config), self.words
 
     @property
     def page(self):
